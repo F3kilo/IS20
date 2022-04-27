@@ -131,6 +131,8 @@ fn inspect_message() {
             // We reject this message, because a call with cycles cannot be made through ingress,
             // only from the wallet canister.
         }
+
+        "getSignedTransaction" => ic_cdk::api::call::accept_message(),
         _ => {
             ic_cdk::println!("The method called is not listed in the access checks. This is probably a code error.");
         }

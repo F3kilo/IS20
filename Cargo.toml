@@ -1,6 +1,6 @@
 [workspace]
 members = [
   "src/token",
-  "src/factory",
+  # "src/factory",
   "src/common",
 ]

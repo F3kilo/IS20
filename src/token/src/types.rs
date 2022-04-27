@@ -97,13 +97,13 @@ pub enum TxError {
 pub type TxReceipt = Result<Nat, TxError>;
 pub type PendingNotifications = HashSet<Nat>;
 
-#[derive(CandidType, Debug, Clone, Copy, Deserialize, PartialEq)]
+#[derive(CandidType, Debug, Clone, Copy, Deserialize, PartialEq, Hash)]
 pub enum TransactionStatus {
     Succeeded,
     Failed,
 }
 
-#[derive(CandidType, Debug, Clone, Copy, Deserialize, PartialEq)]
+#[derive(CandidType, Debug, Clone, Copy, Deserialize, PartialEq, Hash)]
 pub enum Operation {
     Approve,
     Mint,

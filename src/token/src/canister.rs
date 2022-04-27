@@ -7,11 +7,17 @@ use crate::canister::is20_transactions::transfer_include_fee;
 use crate::state::CanisterState;
 use crate::types::{AuctionInfo, StatsData, Timestamp, TokenInfo, TxError, TxReceipt, TxRecord};
 use candid::Nat;
-use common::types::Metadata;
-use ic_canister::{init, query, update, Canister};
+use common::types::{Metadata, SignedTx};
+use ic_canister::{init, query, update, virtual_canister_call, Canister};
 use ic_cdk::export::candid::Principal;
+use ic_helpers::management::Canister as ManagementCanister;
+use ic_helpers::management::{SignWithECDSAArgs, SignWithECDSAReply};
 use num_traits::ToPrimitive;
+use sha2::Digest;
+use sha2::Sha256;
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 mod dip20_transactions;
@@ -149,6 +155,80 @@ impl TokenCanister {
             .ledger
             .get(&id)
             .unwrap_or_else(|| ic_kit::ic::trap(&format!("Transaction {} does not exist", id)))
+    }
+
+    /// Returns a witness for the given transaction with a certificate signed by the canister and IC
+    /// for that witness.
+    ///
+    /// If the transaction with the given ID is not present in the transaction history, returns None.
+    /// This can be if the transaction with the given ID does not exist, or if it was removed
+    /// from the history because it is too old.
+    #[update]
+    async fn getSignedTransaction(&self, id: Nat) -> Option<SignedTx> {
+        let tx = self.state.borrow().ledger.get(&id)?;
+        let encoded = crate::types::get_tx_bytes(&tx);
+
+        let mut hasher = Sha256::new();
+        hasher.update(encoded.clone());
+        let hash = hasher.finalize().to_vec();
+
+        ic_cdk::println!("from: {}", tx.from);
+        ic_cdk::println!("to: {}", tx.to);
+        ic_cdk::println!("caller: {}", tx.caller.unwrap());
+
+        ic_cdk::println!("id: {}", ic_kit::ic::id());
+        ic_cdk::println!("caller: {}", ic_kit::ic::caller());
+        ic_cdk::println!("management_canister: {}", Principal::management_canister());
+
+        // println!("hash: {:?}", hash);
+
+        // let request = SignWithECDSAArgs {
+        //     key_id: "secp256k1".into(),
+        //     message_hash: hash.clone(), // TODO: remove the clone
+        //     derivation_path: vec![],
+        // };
+
+        // let signature_serialized = virtual_canister_call!(
+        //     Principal::management_canister(),
+        //     "sign_with_ecdsa",
+        //     (request,),
+        //     SignWithECDSAReply
+        // )
+        // .await
+        // .map_err(|(r, e)| format!("Failed to sign transaction: {:?}, {}", r, e))
+        // .expect("sign_with_ecdsa failed");
+        // .expect("sign failed");
+        // let signature_serialized = ic_cdk::api::call::call::<_, (SignWithECDSAReply,)>(
+        //     Principal::management_canister(),
+        //     "sign_with_ecdsa",
+        //     (request,),
+        // )
+        // .await
+        // .map_err(|(r, e)| format!("Failed to sign transaction: {:?}, {}", r, e))
+        // .map(|e| e.0)
+        // .expect("sign_with_ecdsa failed");
+
+        let own_principal = ic_kit::ic::id();
+
+        let signature_serialized = ManagementCanister::sign_with_ecdsa(hash.clone())
+            .await
+            .map_err(|(_, err)| format!("sign_with_ecdsa failed for {own_principal}: {err}"))
+            .unwrap();
+
+        let pubkey_serialized = ManagementCanister::get_ecdsa_pubkey(Some(own_principal))
+            .await
+            .map_err(|(_, err)| format!("get_ecdsa_pubkey failed for {own_principal}: {err}"))
+            .unwrap();
+
+        let pubkey = libsecp256k1::PublicKey::parse_slice(&pubkey_serialized.as_bytes(), None)
+            .expect("Response is not a valid public key");
+
+        Some(SignedTx {
+            principal: ic_kit::ic::id(),
+            publickey: pubkey.serialize().to_vec(),
+            signature: signature_serialized.signature,
+            serialized_tx: encoded,
+        })
     }
 
     #[query]
